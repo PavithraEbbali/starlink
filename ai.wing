@@ -17,6 +17,68 @@ at the top; never rewrite history.
 
 ---
 
+## Entry 009 — 2026-09-16 — Mobile responsiveness, GitHub push, Vercel prep
+
+### Measured before / after (at 375px)
+
+| | Before | After |
+|---|---|---|
+| Horizontal overflow (320/375/768) | none | none |
+| Tap targets under 44px | **19** | **0** |
+| `backdrop-filter` elements | **14** | **5** (all cheap `blur-sm`) |
+| Hero image frame shown on a phone | **~22%** | full portrait crop |
+| Smallest body text | 10px | 12px (10px only in desktop-only markup) |
+
+### Image art direction — the real mobile problem
+
+A phone hero is ~0.4:1; these photographs are 1.6–1.8:1. `object-cover` was
+therefore throwing away roughly three quarters of the frame's width, and the
+house in the hero was simply not in shot on a phone.
+
+Four portrait crops were generated (`*-mobile.jpg`, 1200×1500/1600) for the
+hero, FAQ, How-it-works and Residential backdrops, anchored horizontally
+(`ax`) so the subject survives the cut. `scripts/optimize-images.py` gained
+`ax`/`ay` anchors and per-output source overrides.
+
+New `components/ui/BackdropImage.tsx` serves them: portrait below `sm`,
+landscape above. **Both variants are in the DOM** because browsers fetch
+`display:none` images anyway — so the hidden one is given `sizes="…, 1px"`,
+which makes Next resolve it to the smallest srcset entry. Verified at 768px:
+the hidden mobile variant downloads at **1×1px**, the visible landscape at
+768×432. No double download.
+
+### Other responsive fixes
+
+- **`backdrop-filter` gated to `sm:` and up.** It is one of the most expensive
+  things you can ask a mobile GPU to do, and it was on 14 elements including
+  every plan card. Phones now get opaque panels, which also read better over
+  the backdrop photographs.
+- **Tap targets:** header logo (28px → 44 via padding), menu button (40 → 44),
+  header CTA (`h-10` → `h-11`, easing back to `h-10` from `lg`), footer links
+  (16px → 44), legal links (→ 46), email link.
+- **Small text:** 18 tokens made responsive — 11px→12px, 10px→11px, 9px→10px
+  below `sm`. The two remaining 10px nodes are the footer logo sub-lockup and
+  a badge inside the `hidden lg:block` comparison table.
+
+### Repository
+
+- `README.md` rewritten: architecture, image workflow, responsive contract,
+  Vercel steps, and a pre-launch checklist of every placeholder.
+- `.gitignore` already excluded `design/source-images/` (**108 MB**) — worth
+  keeping that way, since everything under `public/` is deployed.
+- Committed 47 files (largest 636 KB) and pushed to
+  `https://github.com/PavithraEbbali/starlink` as `d46a557` on `main`.
+  Verified: `git ls-remote` shows the commit on the remote.
+
+### Vercel
+
+No config needed. `next.config.ts` is empty, there are no env vars, no API
+routes and no server runtime requirement beyond Next's own image optimizer.
+Import the repo at vercel.com/new, accept the auto-detected Next.js preset,
+deploy.
+
+---
+
 ## Entry 008 — 2026-09-16 — Plan group backdrops, scoped to one group
 
 Two steps here. First all three plan groups were switched from banner strips
