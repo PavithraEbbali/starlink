@@ -1,0 +1,656 @@
+# ai.wing — Change Log
+
+Running record of every AI-made change to this project. Each entry says **what**
+changed, **which files**, **why**, and **how to revert it**. Append new entries
+at the top; never rewrite history.
+
+---
+
+## Conventions
+
+- **Single source of truth:** `lib/content.ts`. Prices, plan names, speeds,
+  hardware costs, phone number, legal copy, FAQ and nav all live there.
+  No `.tsx` file contains a hard-coded price, plan name, speed, phone number
+  or CTA string — verified by grep (see Entry 001, Verification).
+- **To change pricing:** edit `lib/content.ts` only. Nothing else.
+- **To revert a change:** follow the "Revert" line in its entry.
+
+---
+
+## Entry 008 — 2026-09-16 — Plan group backdrops, scoped to one group
+
+Two steps here. First all three plan groups were switched from banner strips
+to full-block backdrops; then, on request, that was scoped back to **one**
+group with the other two restored to banners.
+
+### Final state
+
+| Group | Treatment |
+|---|---|
+| Starlink Residential | **backdrop** — photo fills the block behind header and cards |
+| Starlink Roam | banner strip above the header (as before) |
+| Starlink Business | banner strip above the header (as before) |
+
+Driven by a new **`imageTreatment?: 'banner' | 'backdrop'`** field on
+`PlanGroup` in `lib/content.ts`, defaulting to `'banner'`. Only
+`residential` sets `'backdrop'`.
+
+**To move the emphasis:** cut the `imageTreatment: 'backdrop'` line from the
+residential group and paste it onto another. One line, no JSX edit.
+
+### Supporting changes
+
+- `PlanCard` gained an **`onBackdrop`** prop. Frosting (`bg-panel/92
+  backdrop-blur-lg`) and the brighter `bestFor` colour apply only on a
+  backdrop; the banner groups keep the original opaque `bg-panel` and
+  `text-muted`, so they are visually unchanged from before Entry 008.
+- `PlanGroupBlock` now builds the header and grid once and branches only on
+  the wrapper, so the two treatments cannot drift apart.
+- Plan images re-cropped **1600×500 → 2000×1250**. The taller crop is needed
+  for the backdrop; the banner containers use `object-cover` so the same file
+  still works as a strip. One file per group, not two.
+
+### Two bugs caught during this entry
+
+1. **Popular card unreadable on a backdrop.** It used
+   `bg-gradient-to-b from-accent/25 to-panel/92`, which is near-transparent at
+   the top — the bright white van in the Roam photo showed straight through
+   the card heading. Card opacity is now uniform and "popular" is a separate
+   accent-tint overlay instead of a transparency gradient.
+2. **`overflow-hidden` clipped the "Most popular" badge.** The badge is
+   positioned `-top-2.5`, outside the card box. Removed `overflow-hidden` and
+   gave the accent overlay `rounded-t-2xl` instead.
+
+### Verification
+
+- `tsc --noEmit` and `npm run build` clean; `/` still prerendered static
+- Served HTML: **1** backdrop block, **2** banner strips, **3** frosted cards,
+  3 "Most popular" badges — matching one backdrop group of three plans
+- Visual confirmation was partial: the Browser pane stopped painting (returning
+  all-black frames) partway through, so the final state is verified from the
+  served markup rather than on screen
+
+---
+
+## Entry 007 — 2026-09-16 — Fix: section backgrounds were effectively invisible
+
+User reported the background-image change "still isn't implemented". It was —
+the markup and assets were all correct and serving 200. **The scrims were the
+bug.** I had over-darkened them badly enough that the photographs read as flat
+black, which is indistinguishable from the feature not existing.
+
+### The arithmetic
+
+Overlay opacities multiply. What was actually shipping:
+
+| Section | Flat pass | Left pass | Image visible (left) | (centre) |
+|---|---|---|---|---|
+| How it works | `bg-void/70` | `from-void/80` | 0.30 × 0.20 = **6%** | 22% |
+| FAQ | `bg-void/65` | `from-void/75` | 0.35 × 0.25 = **9%** | 28% |
+
+6–9% visibility on an already-dark dusk/golden-hour source is black. And it
+was worst exactly where the eye lands — the left half, behind the headings.
+
+### Fix
+
+Both sections now use:
+
+- flat `bg-void/40` (was 70 / 65)
+- left `from-void/55 via-void/10 to-transparent` (was `/80 via /25` and `/75 via /20`)
+
+New visibility: **27% left, 54% centre, 60% right** — the photo reads as a
+photo.
+
+Legibility is now carried by the content panels rather than by drowning the
+image, so those were strengthened to compensate:
+
+- FAQ accordion panel: `bg-void/55 backdrop-blur-md` → `bg-void/72 backdrop-blur-lg`
+- How-it-works step cards: `bg-panel/80 backdrop-blur-md` → `bg-panel/88 backdrop-blur-lg`
+- How-it-works CTA band: `bg-panel/75 backdrop-blur-md` → `bg-panel/85 backdrop-blur-lg`
+
+Both section intro paragraphs moved `text-mist` → `text-cloud`. The intros sit
+directly on the photograph with no panel behind them, and the muted grey lost
+contrast over the bright sky in the Roam frame. Brightening the text fixes it
+without darkening the scrim back down.
+
+### Lesson for future scrim work
+
+Do not stack a flat overlay and a gradient overlay without multiplying them
+out first. Two individually reasonable-looking values (70% and 80%) compose to
+94% and kill the image. Verify by looking at the section on screen, not by
+confirming the `<img>` is in the DOM — I checked the latter and called it done.
+
+**Revert:** restore the opacity values in the table above in `Faq.tsx` and
+`HowItWorks.tsx`.
+
+**Verified:** `npm run build` clean; both sections screenshotted with the
+photograph clearly visible behind heading, cards and accordion.
+
+---
+
+## Entry 006 — 2026-09-16 — Full-bleed background on How it works (+ timing-claim correction)
+
+### Second full-bleed section background
+
+The FAQ already had one (Entry 004); this adds a second on **How it works**.
+Three of six sections now carry a photographic background: `hero`,
+`how-it-works`, `faq`.
+
+- New asset **`how-it-works-background.jpg`** (2400×1400), derived from the
+  **`plan-roam`** original. Source choice matters here: the thematically
+  obvious pick was a hardware shot, but the hardware photos render in the
+  Fine Print section *directly above*, and the same photograph in two adjacent
+  sections reads as a mistake. The Roam original is two sections away from its
+  banner use.
+- Same four-pass scrim recipe as the FAQ, held slightly darker
+  (`bg-void/70` vs `/65`) because this is a bright golden-hour frame rather
+  than a dusk one.
+- Step cards moved from opaque `bg-panel` to `bg-panel/80 backdrop-blur-md`,
+  and the CTA band to `bg-panel/75 backdrop-blur-md`, so the photograph reads
+  through the section instead of being boxed out by four opaque panels.
+
+**Revert:** in `HowItWorks.tsx` drop the background `<div>`, restore `bg-panel`
+on the card and CTA band, and remove `isolate overflow-hidden` from the
+`<section>`.
+
+### ⚠️ Correction to Entry 002
+
+Entry 002 claimed *"the site now makes no install-duration claim anywhere."*
+**That was wrong.** Two survived and were only caught when one appeared in a
+screenshot during this entry's verification:
+
+- `HARDWARE.standard.specs` — "Sets up in roughly 15 minutes"
+  → "Guided self-install through the Starlink app"
+- `MARQUEE_ITEMS` — "Self-Install In Minutes"
+  → "No Technician Visit Required"
+
+The original sweep only covered the How-it-works section and the FAQ answer.
+A `grep -niE "minute|fifteen|[0-9]+ ?min\b|takes about|in seconds"` over
+`lib/content.ts` now returns nothing, and the rendered HTML confirms zero
+timing claims.
+
+### Verification
+
+- `tsc --noEmit` and `npm run build` clean; `/` still prerendered static
+- `how-it-works-background.jpg` serves 200; optimises to a **232 KB WebP** at 1920w
+- 13 `<img>` on the page; sections with a background image: hero, how-it-works, faq
+- 320px: `scrollWidth === clientWidth === 320`, zero offending elements
+- Served image payload: **3.3 MB across 14 files**
+
+---
+
+## Entry 005 — 2026-09-16 — Footer copyright line removed
+
+Removed `© 2026 Starlink Authorized Retailer. All rights reserved.`
+
+- Deleted the `copyright` key from `FOOTER_LEGAL` in `lib/content.ts` (it was
+  the only place `new Date().getFullYear()` was used).
+- Deleted the `<p>` that rendered it in `Footer.tsx`, and simplified the
+  container: the bottom row was a `flex ... lg:justify-between` two-up holding
+  the policy links and the copyright. With one child left, the flex wrapper
+  was doing nothing, so it is now a plain `<div>` and the policy links sit
+  flush left.
+
+The three legal disclosure paragraphs above it (retailer disclosure,
+compensation, pricing note) are untouched — only the copyright line went.
+
+**Revert:** restore the `copyright` key and re-add the `<p>` plus the
+`flex flex-col gap-5 ... lg:flex-row lg:items-center lg:justify-between`
+classes on the wrapper.
+
+**Verified:** `tsc --noEmit` and `npm run build` clean; no `copyright` or
+"All rights reserved" reference anywhere in `lib/`, `components/` or `app/`;
+rendered HTML confirms the line is gone and all five policy links remain.
+
+---
+
+## Entry 004 — 2026-09-16 — Hero headline + full-bleed FAQ background
+
+### Hero headline
+
+| Before | After |
+|---|---|
+| High-speed satellite internet, wherever you are. | High-speed satellite internet for homes, vehicles and businesses. |
+
+Names all three product lines the site actually sells (Residential / Roam /
+Business) instead of the looser "wherever you are".
+**Revert:** `HERO.headline` in `lib/content.ts` — one line.
+
+### FAQ section now has a full-bleed photographic background
+
+The FAQ was the only section on the page with no imagery, sitting between two
+image-heavy sections and the footer, so it was the natural place for a
+full-bleed backdrop — and it has no card images to compete with.
+
+- New asset **`faq-background.jpg`** (2400×1400), cut from the `og-image`
+  original at section proportions. Kept as its own file so it can be swapped
+  without disturbing the social preview card.
+- `scripts/optimize-images.py` now supports a **source-stem override**, so one
+  original can produce several differently-cropped outputs. It also now reads
+  from `design/source-images/` rather than `public/images/`.
+- Section changed from flat `bg-ink` to `isolate overflow-hidden` with the
+  image at `-z-10` and a four-pass scrim:
+  - flat `bg-void/65` — overall darkness
+  - left-to-right `from-void/75 via-void/20` — keeps the heading rail readable
+  - two **fixed-height 28-unit edge bands** (top and bottom) that fade into the
+    black sections above and below
+
+  The edge bands are deliberately fixed-height rather than a full-height
+  gradient. A first pass used `from-void via-transparent to-void` across the
+  whole section, which washed the photograph out almost everywhere except a
+  thin middle strip — it read as a dark smudge rather than a background.
+- The accordion now sits on a **frosted panel** (`bg-void/55 backdrop-blur-md`,
+  rounded, hairline border) so body copy holds contrast wherever the photo is
+  brightest, and the section still reads as an enterprise page rather than a
+  poster.
+
+**Revert:** in `Faq.tsx`, drop the background `<div>` and the panel classes on
+`StaggerGrid`, and restore `bg-ink` on the `<section>`.
+
+### Verification
+
+- `tsc --noEmit` and `npm run build` clean; `/` still prerendered static
+- `faq-background.jpg` serves 200; optimises to a **127 KB WebP** at 1920w
+- 12 `<img>` on the page, 0 broken
+- 320px: `scrollWidth === clientWidth === 320`, zero offending elements — the
+  longer headline wraps to 191px tall and does not overflow
+- Served image payload: **2.7 MB across 13 files**
+
+---
+
+## Entry 003 — 2026-09-16 — Real photography implemented
+
+All 12 supplied images are live. They arrived as 2816×1536 **RGBA PNGs,
+8–10 MB each — 107.6 MB total**, which would have destroyed the PageSpeed
+target, so they were converted before being wired in.
+
+### What was done
+
+1. **Converted PNG → optimised JPEG** at the exact dimensions the layout
+   expects, via `scripts/optimize-images.py` (centre crop to the target aspect
+   ratio, no distortion, per-image vertical anchor, quality 82, progressive).
+   **107.6 MB → 2.3 MB (47× smaller).** The hero now leaves the server as a
+   **93 KB WebP** at 1080w through `next/image`.
+2. **Originals moved out of `public/`** to `design/source-images/` and
+   gitignored. Anything in `public/` is served and deployed, so 107 MB of PNGs
+   sitting there would have shipped to production.
+3. **Filenames now match** — the supplied files were `.png`, `lib/content.ts`
+   references `.jpg`. Conversion resolved this with no code change.
+4. **Alt text rewritten** on 10 of 12 to describe what the photographs actually
+   show rather than what was briefed (they differ — see below).
+
+**Revert:** originals are intact in `design/source-images/`. Re-run
+`python scripts/optimize-images.py` to regenerate the served set.
+
+### Verification
+
+- All 12 serve HTTP 200, byte counts matching the files on disk exactly
+- 11 `<img>` on the page, **0 broken**; below-fold images correctly lazy-load
+- `tsc --noEmit` clean, `npm run build` clean, `/` still prerendered static
+- Next image cache (`.next/dev/cache/images`) cleared — it was serving stale
+  placeholder renders after the swap
+
+### ⚠️ Three issues with the supplied images
+
+**1. Gemini watermark on all 12.** Every image carries Google's four-pointed
+sparkle bottom-right. The aspect-ratio crops removed it incidentally from the
+10 card/banner images, but it **remains visible on `hero-background.jpg` and
+`og-image.jpg`** — the two most prominent. It was not edited out deliberately:
+it is a provenance marker and removing it would likely breach Google's terms.
+The fix is to re-export without it (Google AI Studio / Vertex AI, or a paid
+Gemini tier), not to retouch it.
+
+**2. Wrong hardware in two images.** `hardware-high-performance.jpg` and
+`plan-business.jpg` both show **round parabolic dishes**. Starlink's Flat High
+Performance unit is a large flat rectangle. These read as generic satellite or
+microwave antennas and will look wrong to anyone who knows the product. Alt
+text was written generically ("a satellite dish") rather than claiming they are
+Starlink hardware.
+
+**3. Regional mismatch.** Most images are clearly shot in South Asia — tiled
+roofs and compound walls, coconut palms, salwar kameez, Indic script on the
+bookshelf. The site targets the US: ZIP code checker, USD pricing, ET support
+hours, Delaware address, and a footer reading "U.S. households and businesses."
+Affects `plan-residential`, `plan-roam`, `plan-business`, `setup-step-1/2/3/4`.
+
+`hero-background`, `hardware-standard`, `hardware-mini` and `setup-step-1` are
+strong and read as genuine photography.
+
+---
+
+## Entry 002 — 2026-09-16 — Copy, layout and imagery revision
+
+Requested revision pass. Each item below is independently revertable.
+
+### Removed
+
+| What | File | Revert |
+|---|---|---|
+| Hero background animation (black hole, starfield, parallax, orbital SVG) | `Hero.tsx`; `components/ui/DeepSpace.tsx` **deleted** | Restore `DeepSpace.tsx` from Entry 001 and re-add `<DeepSpace variant="hole" />` + `OrbitalPaths` to `Hero.tsx` |
+| Hero "Prefer to talk it through? / Call to order" | `Hero.tsx` | Re-add a `<CallButton>` block after `<ZipChecker />` |
+| How-it-works scroll-scrubbed dish assembly (the whole `DishAssembly` SVG, sticky column, `useScroll`/`useSpring`/`useMotionValueEvent` wiring) | `HowItWorks.tsx` — rewritten | Restore the Entry 001 version of the file |
+
+⚠️ **Note:** removing the hero call button reverses the original brief's
+"KEEP Hero Call Button" rule. Done on explicit instruction. Phone access is
+unaffected — the sticky header CTA sits directly above and stays visible on
+scroll, and there are now 19 `tel:` CTAs on the page (up from 17).
+
+### Layout
+
+- Hero top padding `pt-16/sm:pt-24/lg:pt-32` → `pt-10/sm:pt-14/lg:pt-16`,
+  and headline `mt-6` → `mt-5`. Closes the gap under the navbar.
+- How it works is now a flat 4-up card grid (2-up tablet, 1-up mobile) with a
+  photo, step number, title and body per card — the pattern the reference
+  retailer sites use. No sticky column, no scroll dependency.
+- Hardware cards gained a photo and a **"Call to order"** button pinned to the
+  card bottom with `mt-auto` so all three align.
+
+### Copy — all rewritten and moved into `SECTIONS` in `lib/content.ts`
+
+Section headings were previously inline in the JSX. They now live in
+`lib/content.ts` under `SECTIONS`, consistent with the rest of the data layer.
+
+| Before | After |
+|---|---|
+| High-Speed Internet. Anywhere. | High-speed satellite internet, wherever you are. |
+| Pick the plan that fits how you connect. | Compare Starlink plans and pricing. |
+| Every number, in one place. | Complete plan and pricing comparison. |
+| Three kits. One-time cost. | Starlink hardware options. |
+| From box to online in about fifteen minutes. | A simple, four-step setup process. |
+| Questions worth asking. | Frequently asked questions. |
+
+Also rewritten: hero subline, all three plan-group blurbs, the how-it-works
+intro, all four `SETUP_STEPS` titles and bodies, and the how-it-works CTA line.
+
+**All timing claims removed** — the "about fifteen minutes" phrasing is gone
+from the how-it-works section *and* from the `faq-install` answer, so the site
+makes no install-duration claim anywhere.
+
+*"Frequently asked questions."* was not on the request list, but it was written
+in the same voice as the headings that were, so it was changed for consistency.
+**Revert:** set `SECTIONS.faq.heading` back to `'Questions worth asking.'`
+
+### Branding — "Northstar Connect LLC" removed everywhere
+
+Zero occurrences remain in `app/`, `components/` or `lib/`.
+
+The footer disclosure could not simply become "Starlink", because
+`legalEntity` is interpolated into sentences that would then read *"Starlink is
+an independent authorized retailer of Starlink"* — self-referential, and it
+would undercut the disclosure that keeps the site from looking like the carrier.
+So the disclosures were rephrased to avoid naming an entity at all:
+
+- `retailerDisclosure` → "This site is operated by an independent authorized
+  retailer of Starlink. Starlink and the Starlink logo are trademarks of Space
+  Exploration Technologies Corp. This site is not operated by Space
+  Exploration Technologies Corp."
+- `compensation` → "The retailer operating this site receives compensation for
+  orders placed through it."
+- `legalEntity` / `brandName` → `'Starlink Authorized Retailer'` (used in the
+  copyright line and metadata).
+
+**Before launch:** put your real registered company name in `SITE.legalEntity`.
+A retailer disclosure naming no legal entity is weaker than one that does.
+
+### Imagery — new `IMAGES` architecture
+
+Image paths live in `lib/content.ts`: the `IMAGES` const, plus an optional
+`image?: SiteImage` on `PlanGroup`, `HardwareItem` and each `SETUP_STEPS`
+entry. Components render from those, so swapping a photo never touches JSX.
+
+All 12 slots ship with dark on-brand **placeholder JPGs** in `public/images/`
+so nothing 404s. Overwrite in place, same filename — no code change needed.
+Generator script: `scratchpad/make_placeholders.py`.
+
+Rendering uses `next/image` with `fill` + `sizes`; the hero image carries
+`priority` so it is the LCP element and is never lazy-loaded.
+
+Also added: `SITE.siteUrl` + `metadataBase` in `app/layout.tsx`, which clears
+the Next build warning and makes OG/Twitter image URLs absolute.
+
+### Verification
+
+- `npm run build` clean, `/` still prerendered static; `tsc --noEmit` clean
+- 320px: `scrollWidth === clientWidth === 320`, zero offending elements
+- Hero: `heroHasCallCta: false`, `heroHasZip: true`
+- Hardware: 3 cards / 3 CTAs · How it works: 4 cards / 0 animation SVG
+- 11 `<img>` elements rendering; 19 `tel:` CTAs all with `data-call-cta`
+- Rendered text contains no "fifteen minutes", no "Northstar", no "Prefer to talk"
+
+---
+
+## Entry 001 — 2026-09-16 — Initial build (from scratch)
+
+Built the complete one-page Starlink Authorized Retailer site.
+
+**Revert:** delete the whole project directory and re-scaffold. This entry is
+the initial commit-equivalent; there is no prior state to return to.
+
+### Stack
+
+| Piece | Version | Why |
+|---|---|---|
+| Next.js | 16.3.5 (App Router, Turbopack) | Static prerender of `/` for PageSpeed |
+| React | 19.2.8 | Ships with Next 16 |
+| TypeScript | 5.x | Required |
+| Tailwind CSS | 4.x (`@theme` tokens) | No config file needed |
+| `motion` | 13.x | Framer Motion's current package name |
+| `lenis` | 1.3.x | Smooth scrolling |
+
+Installed with:
+```bash
+npx create-next-app@latest . --typescript --tailwind --eslint --app --no-src-dir --import-alias "@/*"
+npm install motion lenis
+```
+
+### Files created
+
+**Data layer**
+- `lib/content.ts` — the single source of truth. Sections 1–11: retailer
+  identity, nav, hero, marquee, service-line order, plan groups, hardware,
+  setup steps, FAQ, footer, derived helpers.
+
+**Primitives (`components/ui/`)**
+- `PriceLockup.tsx` — the universal `<PriceLockup plan={plan} />`. Renders a
+  flex row: `$` symbol, dominant integer (clamped to 2.5rem–3.5rem), muted
+  cents, `/mo`. Visual row is `aria-hidden`; a single clean `sr-only`
+  sentence is exposed instead. Falls back to "Custom pricing" when
+  `plan.price` is undefined.
+- `CallButton.tsx` — every phone CTA. Always `href={SITE.phoneHref}` and
+  always carries `data-call-cta`.
+- `Magnetic.tsx` — magnetic cursor pull for CTAs.
+- `TiltCard.tsx` — 3D tilt + cursor-tracked specular glare for plan cards.
+- `Reveal.tsx` — `Reveal`, `RevealText` (word-by-word mask), `StaggerGrid`,
+  `StaggerItem`.
+- `Marquee.tsx` — CSS-only infinite ticker; duplicate half is `aria-hidden`.
+- `DeepSpace.tsx` — black-hole accretion disc + two parallax starfield layers.
+  Pure CSS gradients; no canvas, no WebGL, no image payload.
+
+**Providers**
+- `components/providers/SmoothScroll.tsx` — Lenis setup + anchor interception
+  with a −96px offset to clear the fixed chrome.
+
+**Sections (`components/sections/`)**
+- `Header.tsx` — exports `Logo`, `DisclosureBar`, `Header`.
+- `Hero.tsx` — includes `OrbitalPaths` (SVG path-draw).
+- `ZipChecker.tsx` — front-end only, validates 5-digit format.
+- `PlanCard.tsx`, `Plans.tsx`, `FinePrint.tsx`, `HowItWorks.tsx`, `Faq.tsx`,
+  `Footer.tsx`.
+
+**App**
+- `app/layout.tsx` — Inter (400/500/600 only), metadata, viewport, skip link.
+- `app/page.tsx` — composes the 8 sections in canonical order.
+- `app/globals.css` — brand tokens, layered base/components CSS, keyframes.
+- `.claude/launch.json` — dev-server config for the preview pane.
+
+### Section order (as built)
+
+1. Top disclosure bar — persistent, non-dismissable
+2. Sticky header — logo, anchor nav, phone-number CTA
+3. Hero — eyebrow, H1, subline, price anchor, **ZIP checker + call button**,
+   trust chips, marquee
+4. Plans — data-driven service lines
+5. Fine print — comparison table + `#hardware` kit grid
+6. How it works — scroll-scrubbed dish assembly
+7. FAQ — accordion
+8. Footer
+
+### Animations implemented
+
+| Animation | Where |
+|---|---|
+| Lenis smooth scroll | `SmoothScroll.tsx` |
+| Black hole / deep space | `DeepSpace.tsx` (Hero) |
+| Parallax depth | `DeepSpace.tsx` — 3 layers at different rates |
+| Scroll-scrubbed assembly | `HowItWorks.tsx` — `DishAssembly` |
+| Scroll-triggered text reveal | `Reveal.tsx` — `RevealText` |
+| SVG path draw | `Hero.tsx` `OrbitalPaths`, `HowItWorks.tsx` beam/cable |
+| Magnetic buttons | `Magnetic.tsx` → `CallButton` |
+| 3D card tilt | `TiltCard.tsx` → `PlanCard` |
+| Staggered grid entrance | `StaggerGrid`/`StaggerItem` → plans, fine print, hardware, FAQ |
+| Infinite marquee | `Marquee.tsx` |
+| Clip-path wipe | `wipe-reveal` keyframe in `globals.css` |
+
+All of it is reduced-motion aware: `useReducedMotion()` in JS, plus a global
+`@media (prefers-reduced-motion: reduce)` block.
+
+---
+
+### Pricing data — provenance ⚠️ READ THIS
+
+`starlink.com` renders its pricing client-side and blocks automated browsers
+(it returned a blank page in both `WebFetch` and a real browser pane), so the
+figures below could **not** be read off the official site directly. They were
+cross-referenced across four independent trackers that agreed, the most recent
+checked 15 Sept 2026:
+
+| Plan | Monthly |
+|---|---|
+| Residential 100 Mbps | $55 |
+| Residential 200 Mbps | $85 |
+| Residential Max | $130 |
+| Roam 100 GB | $55 |
+| Roam 300 GB | $80 |
+| Roam Unlimited | $175 |
+| Business Priority 50 GB | $55 |
+| Business Priority 500 GB | $155 |
+| Business Priority 1 TB | $280 |
+| Business Priority 2 TB | $530 |
+
+| Hardware | One-time |
+|---|---|
+| Standard Kit | $349 |
+| Starlink Mini | $249 |
+| Flat High Performance Kit | $2,500 |
+
+**Action for you:** confirm these against your retailer portal before going
+live. Corrections go in `lib/content.ts` and nowhere else.
+
+Two earlier sources disagreed and were **rejected** as stale: one still listed
+a retired "Residential Lite" tier, another quoted a $599 Roam kit. Starlink
+restructured Residential from named tiers to speed tiers; "Residential Lite"
+no longer exists in the US.
+
+### Placeholder identity — replace before launch
+
+In `lib/content.ts` → `SITE`:
+`brandName`, `legalEntity`, `phoneDisplay`, `phoneHref`, `hours`, `address`,
+`email`. All are invented placeholders. Changing `phoneHref` updates all 17
+`tel:` links at once.
+
+`LEGAL_LINKS` points at `/privacy`, `/terms`, `/disclaimer`, `/tcpa`,
+`/cookies` — **these routes do not exist yet** and will 404.
+
+### Negative constraints — all honoured
+
+- ✅ No support-routing copy anywhere
+- ✅ Hero keeps **both** ZIP checker and call button
+- ✅ Body CTAs say only "Call to order" / "Call for pricing" — never the raw
+  number. Header and footer show the number, as specified.
+- ✅ No competitor bashing; no "ordering channel, not the network operator"
+- ✅ No fiber / cable / bundle / TV / mobile / phone sections. Enforced
+  structurally: `getActiveServiceLines()` filters out lines with zero plans,
+  so they cannot render even as empty placeholders.
+- ✅ No Broadband Facts label link
+- ✅ No "Pricing observed [date]" stamp
+- ✅ No "Is this the official site?" FAQ
+
+### Verification performed
+
+- `npm run build` — clean; `/` prerendered as static content
+- `npx tsc --noEmit` — clean
+- **Horizontal overflow at 320px:** `scrollWidth === clientWidth === 320`,
+  zero offending elements
+- **`data-call-cta`:** 17 of 17 `tel:` links carry it
+- **Body CTA labels:** only `["Call to order"]`; zero raw phone numbers
+- **Banned strings:** all six checked against rendered text — none present
+- **No hard-coded data in layout files:** grep for dollar amounts, plan names,
+  speeds, phone numbers and CTA strings across `app/` + `components/` returns
+  nothing but explanatory comments
+- **Live propagation test:** changed `residential-100` price to a sentinel in
+  `lib/content.ts` → it appeared in **6** render sites (hero lockup + its
+  sr-only string, plan card + its sr-only string, desktop table row, mobile
+  card). Reverted afterwards.
+
+---
+
+### Bugs found and fixed during the build
+
+Recording these because each was subtle and could plausibly reappear.
+
+1. **Tailwind utilities silently overridden by unlayered CSS**
+   `globals.css` had base resets written outside any cascade layer. Unlayered
+   CSS outranks *every* `@layer`, so `a { color: inherit }` beat Tailwind's
+   `text-void` and the header call button rendered white-on-white.
+   *Fix:* base resets moved into `@layer base`, custom classes into
+   `@layer components`. **Keep new element-level CSS inside `@layer base`.**
+
+2. **`whileInView` could never fire on masked words**
+   `RevealText` put the in-view trigger on each word span, but each word
+   starts translated 105% down — fully outside its own `overflow-hidden`
+   mask. IntersectionObserver clips against overflowing ancestors, so the
+   intersection rect was always empty and the words hid themselves forever.
+   *Fix:* trigger moved to the unclipped heading; words animate via variant
+   propagation. **Never attach `whileInView` to an element that starts
+   outside its own clip.**
+
+3. **SVG `d` attribute morphing**
+   The hamburger animated `d` between paths with different command
+   structures; motion can't interpolate those and emitted `d="undefined"`.
+   *Fix:* three bars on the centre line, spread with `translateY`, animated
+   with transforms only.
+
+4. **`transform-origin` is not a React DOM property**
+   Used as a JSX attribute in `HowItWorks.tsx`. *Fix:* moved into `style` as
+   `transformOrigin`.
+
+5. **Conditional hook call** — `useTransform` was called inside JSX in
+   `TiltCard.tsx`, breaking the Rules of Hooks. *Fix:* hoisted to top level.
+
+6. **JSX comment as a second child** — a `{/* */}` comment placed beside an
+   element inside `{cond && ( … )}` is a parse error. *Fix:* comment moved
+   above the conditional.
+
+7. **320px header overflow** — logo + full phone number + menu button summed
+   past 320px, and `overflow-x: hidden` would have clipped the menu button
+   out of reach. *Fix:* added `--breakpoint-xs: 25rem`; below it the header
+   shows the orbital mark alone (`<Logo compact />`). The footer keeps the
+   full lockup. **Revert:** drop `compact` from `Logo` in `Header.tsx`.
+
+8. **Motion overrides SVG `transformOrigin`** — motion normalises SVG
+   transforms to `transform-box: fill-box` with a `50% 50%` origin, so the
+   explicit pixel origins set on the dish, satellite and mast were silently
+   discarded. Centre origin is correct for the dish and satellite, so those
+   dead props were removed; the mast now uses `originY: 1` (a value motion
+   does honour) so it telescopes up out of the base instead of expanding
+   from its middle. **Revert:** remove `originY: 1` from the mast's `style`
+   in `HowItWorks.tsx`.
+
+---
+
+### Known gaps (deliberate — frontend-only build)
+
+- ZIP checker does no real lookup. It validates format, then directs to a
+  call. There is no backend by design.
+- Legal routes are linked but not built.
+- No `opengraph-image`; the default Next favicon is still in place.
